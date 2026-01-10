@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GSTR-2B Excel Consolidator</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+            max-width: 700px;
+            width: 100%;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 28px;
+            text-align: center;
+        }
+
+        .subtitle {
+            color: #666;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .sheet-list {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 25px;
+        }
+
+        .sheet-list h3 {
+            color: #555;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+
+        .sheets {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .sheet-tag {
+            background: #667eea;
+            color: white;
+            padding: 5px 12px;
+            border-radius: 15px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .upload-area {
+            border: 3px dashed #667eea;
+            border-radius: 15px;
+            padding: 40px;
+            text-align: center;
+            margin-bottom: 25px;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: #f8f9fa;
+        }
+
+        .upload-area:hover {
+            border-color: #764ba2;
+            background: #f0f0f0;
+        }
+
+        .upload-area.dragover {
+            background: #e8eaf6;
+            border-color: #764ba2;
+        }
+
+        .upload-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+
+        .upload-text {
+            color: #555;
+            font-size: 16px;
+            margin-bottom: 10px;
+        }
+
+        .upload-subtext {
+            color: #888;
+            font-size: 13px;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .file-list {
+            margin-bottom: 25px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .file-item {
+            background: #f8f9fa;
+            padding: 10px 15px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 14px;
+        }
+
+        .file-item .name {
+            color: #333;
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .file-item .remove {
+            color: #e74c3c;
+            cursor: pointer;
+            font-weight: bold;
+            padding: 0 10px;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            transition: transform 0.2s, box-shadow 0.2s;
+            margin-bottom: 15px;
+        }
+
+        .btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .progress-container {
+            display: none;
+            margin-bottom: 25px;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 30px;
+            background: #e0e0e0;
+            border-radius: 15px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            transition: width 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .log-container {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 15px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            display: none;
+        }
+
+        .log-item {
+            padding: 5px 0;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .log-item:last-child {
+            border-bottom: none;
+        }
+
+        .log-warning {
+            color: #f39c12;
+        }
+
+        .log-error {
+            color: #e74c3c;
+        }
+
+        .log-success {
+            color: #27ae60;
+        }
+
+        .log-info {
+            color: #3498db;
+        }
+
+        .success-message {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+            display: none;
+        }
+
+        .error-message {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 GSTR-2B Consolidator</h1>
+        <p class="subtitle">Automatically consolidate multiple GSTR-2B Excel files into one</p>
+
+        <div class="sheet-list" id="sheetList" style="display: none;">
+            <h3>Detected Sheet Names:</h3>
+            <div class="sheets" id="detectedSheets"></div>
+        </div>
+
+        <div class="upload-area" id="uploadArea">
+            <div class="upload-icon">📁</div>
+            <div class="upload-text">Click to select GSTR-2B Excel files</div>
+            <div class="upload-subtext">or drag and drop files here (.xls, .xlsx)</div>
+            <input type="file" id="fileInput" multiple accept=".xls,.xlsx">
+        </div>
+
+        <div class="file-list" id="fileList"></div>
+
+        <div class="success-message" id="successMessage"></div>
+        <div class="error-message" id="errorMessage"></div>
+
+        <button class="btn" id="consolidateBtn" disabled>Start Consolidation</button>
+
+        <div class="progress-container" id="progressContainer">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill">0%</div>
+            </div>
+        </div>
+
+        <div class="log-container" id="logContainer"></div>
+    </div>
+
+    <script>
+        let selectedFiles = [];
+        let discoveredSheets = new Set();
+
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const fileList = document.getElementById('fileList');
+        const consolidateBtn = document.getElementById('consolidateBtn');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressFill = document.getElementById('progressFill');
+        const logContainer = document.getElementById('logContainer');
+        const successMessage = document.getElementById('successMessage');
+        const errorMessage = document.getElementById('errorMessage');
+        const sheetList = document.getElementById('sheetList');
+        const detectedSheets = document.getElementById('detectedSheets');
+
+        // Upload area click
+        uploadArea.addEventListener('click', () => fileInput.click());
+
+        // File selection
+        fileInput.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+        });
+
+        // Drag and drop
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            handleFiles(e.dataTransfer.files);
+        });
+
+        function handleFiles(files) {
+            const excelFiles = Array.from(files).filter(file => 
+                file.name.endsWith('.xls') || file.name.endsWith('.xlsx')
+            );
+
+            if (excelFiles.length === 0) {
+                showError('Please select valid Excel files (.xls or .xlsx)');
+                return;
+            }
+
+            selectedFiles = [...selectedFiles, ...excelFiles];
+            updateFileList();
+            discoverSheets();
+            consolidateBtn.disabled = selectedFiles.length === 0;
+            hideMessages();
+        }
+
+        function updateFileList() {
+            fileList.innerHTML = '';
+            selectedFiles.forEach((file, index) => {
+                const div = document.createElement('div');
+                div.className = 'file-item';
+                div.innerHTML = `
+                    <span class="name">${file.name}</span>
+                    <span class="remove" onclick="removeFile(${index})">✕</span>
+                `;
+                fileList.appendChild(div);
+            });
+        }
+
+        function removeFile(index) {
+            selectedFiles.splice(index, 1);
+            updateFileList();
+            discoverSheets();
+            consolidateBtn.disabled = selectedFiles.length === 0;
+        }
+
+        async function discoverSheets() {
+            discoveredSheets.clear();
+            
+            if (selectedFiles.length === 0) {
+                sheetList.style.display = 'none';
+                return;
+            }
+
+            consolidateBtn.disabled = true;
+            consolidateBtn.textContent = 'Analyzing sheets...';
+
+            for (const file of selectedFiles) {
+                try {
+                    const data = await file.arrayBuffer();
+                    const workbook = XLSX.read(data, { type: 'array', bookSheets: true });
+                    workbook.SheetNames.forEach(sheet => discoveredSheets.add(sheet));
+                } catch (error) {
+                    console.error(`Error reading ${file.name}:`, error);
+                }
+            }
+
+            updateSheetDisplay();
+            consolidateBtn.disabled = false;
+            consolidateBtn.textContent = 'Start Consolidation';
+        }
+
+        function updateSheetDisplay() {
+            if (discoveredSheets.size === 0) {
+                sheetList.style.display = 'none';
+                return;
+            }
+
+            sheetList.style.display = 'block';
+            detectedSheets.innerHTML = '';
+            
+            const sortedSheets = Array.from(discoveredSheets).sort();
+            sortedSheets.forEach(sheet => {
+                const span = document.createElement('span');
+                span.className = 'sheet-tag';
+                span.textContent = sheet;
+                detectedSheets.appendChild(span);
+            });
+
+            const h3 = sheetList.querySelector('h3');
+            h3.textContent = `Detected Sheet Names (${discoveredSheets.size} sheets):`;
+        }
+
+        function log(message, type = 'info') {
+            logContainer.style.display = 'block';
+            const div = document.createElement('div');
+            div.className = `log-item log-${type}`;
+            div.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logContainer.appendChild(div);
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+
+        function updateProgress(percent, text) {
+            progressContainer.style.display = 'block';
+            progressFill.style.width = percent + '%';
+            progressFill.textContent = text || `${percent}%`;
+        }
+
+        function showSuccess(message) {
+            successMessage.textContent = message;
+            successMessage.style.display = 'block';
+            errorMessage.style.display = 'none';
+        }
+
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.style.display = 'block';
+            successMessage.style.display = 'none';
+        }
+
+        function hideMessages() {
+            successMessage.style.display = 'none';
+            errorMessage.style.display = 'none';
+        }
+
+        function isRowEmpty(row) {
+            // Check if a row is completely empty or contains only whitespace
+            return Object.values(row).every(val => {
+                if (val === null || val === undefined) return true;
+                const strVal = String(val).trim();
+                return strVal === '' || strVal === '-' || strVal === 'NA';
+            });
+        }
+
+        function isHeaderRow(row, headerReference) {
+            // Check if a row matches the header structure
+            if (!headerReference) return false;
+            
+            const rowKeys = Object.keys(row).sort();
+            const headerKeys = Object.keys(headerReference).sort();
+            
+            // If the number of columns doesn't match, it's not a header
+            if (rowKeys.length !== headerKeys.length) return false;
+            
+            // Check if the keys (column names) match
+            return rowKeys.every((key, index) => key === headerKeys[index]);
+        }
+
+        function normalizeHeaders(data) {
+            // Normalize column names to handle minor variations
+            if (!data || data.length === 0) return data;
+            
+            return data.map(row => {
+                const normalized = {};
+                Object.keys(row).forEach(key => {
+                    // Trim whitespace and normalize the key
+                    const normalizedKey = key.trim();
+                    normalized[normalizedKey] = row[key];
+                });
+                return normalized;
+            });
+        }
+
+        async function consolidateFiles() {
+            if (selectedFiles.length === 0) return;
+
+            consolidateBtn.disabled = true;
+            logContainer.innerHTML = '';
+            logContainer.style.display = 'block';
+            hideMessages();
+
+            log(`Starting consolidation of ${selectedFiles.length} files...`, 'info');
+            log(`Detected ${discoveredSheets.size} unique sheet(s) across all files`, 'info');
+
+            const consolidatedData = {};
+            const sheetHeaders = {}; // Store header reference for each sheet
+            
+            discoveredSheets.forEach(sheet => {
+                consolidatedData[sheet] = [];
+                sheetHeaders[sheet] = null;
+            });
+
+            let processedFiles = 0;
+            const corruptFiles = [];
+
+            for (let i = 0; i < selectedFiles.length; i++) {
+                const file = selectedFiles[i];
+                const percentComplete = Math.round(((i + 1) / selectedFiles.length) * 100);
+                updateProgress(percentComplete, `Processing ${i + 1}/${selectedFiles.length}`);
+
+                try {
+                    log(`Processing: ${file.name}`, 'info');
+                    
+                    const data = await file.arrayBuffer();
+                    const workbook = XLSX.read(data, { type: 'array' });
+
+                    const fileSheets = workbook.SheetNames;
+
+                    discoveredSheets.forEach(expectedSheet => {
+                        // Try exact match first
+                        let matchedSheet = fileSheets.find(s => s === expectedSheet);
+                        
+                        // If no exact match, try case-insensitive
+                        if (!matchedSheet) {
+                            matchedSheet = fileSheets.find(s => 
+                                s.toLowerCase() === expectedSheet.toLowerCase()
+                            );
+                        }
+
+                        if (matchedSheet) {
+                            const worksheet = workbook.Sheets[matchedSheet];
+                            
+                            // Read with header option to get raw data
+                            let rawData = XLSX.utils.sheet_to_json(worksheet, { 
+                                defval: '',
+                                raw: false,
+                                blankrows: false // Skip blank rows
+                            });
+
+                            if (rawData.length > 0) {
+                                // Normalize headers
+                                rawData = normalizeHeaders(rawData);
+                                
+                                // Filter out empty rows
+                                rawData = rawData.filter(row => !isRowEmpty(row));
+                                
+                                if (rawData.length > 0) {
+                                    // Store the header structure from the first file
+                                    if (!sheetHeaders[expectedSheet]) {
+                                        sheetHeaders[expectedSheet] = rawData[0];
+                                        // Add all rows from the first file
+                                        consolidatedData[expectedSheet].push(...rawData);
+                                        log(`  ✓ Sheet: ${expectedSheet} - Added ${rawData.length} rows (including header)`, 'success');
+                                    } else {
+                                        // For subsequent files, check and skip header if present
+                                        let dataToAdd = rawData;
+                                        let skippedHeader = false;
+                                        
+                                        // Check if first row is a header
+                                        if (isHeaderRow(rawData[0], sheetHeaders[expectedSheet])) {
+                                            dataToAdd = rawData.slice(1); // Skip the header row
+                                            skippedHeader = true;
+                                        }
+                                        
+                                        // Filter out any additional blank rows
+                                        dataToAdd = dataToAdd.filter(row => !isRowEmpty(row));
+                                        
+                                        if (dataToAdd.length > 0) {
+                                            consolidatedData[expectedSheet].push(...dataToAdd);
+                                            log(`  ✓ Sheet: ${expectedSheet} - Added ${dataToAdd.length} data rows${skippedHeader ? ' (header skipped)' : ''}`, 'success');
+                                        } else {
+                                            log(`  ⚠ Sheet: ${expectedSheet} - No data rows found`, 'warning');
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            log(`  ⚠ Missing sheet: ${expectedSheet}`, 'warning');
+                        }
+                    });
+
+                    processedFiles++;
+                } catch (error) {
+                    log(`  ✗ Error processing ${file.name}: ${error.message}`, 'error');
+                    corruptFiles.push(file.name);
+                }
+            }
+
+            if (corruptFiles.length > 0) {
+                const corruptList = corruptFiles.join('\n• ');
+                alert(`⚠️ The following files could not be processed:\n\n• ${corruptList}\n\nContinuing with remaining files...`);
+            }
+
+            if (processedFiles === 0) {
+                showError('No files could be processed successfully.');
+                consolidateBtn.disabled = false;
+                return;
+            }
+
+            // Create consolidated workbook
+            log('Creating consolidated workbook...', 'info');
+            const consolidatedWorkbook = XLSX.utils.book_new();
+
+            let totalRows = 0;
+            const sortedSheets = Array.from(discoveredSheets).sort();
+            
+            sortedSheets.forEach(sheetName => {
+                const data = consolidatedData[sheetName];
+                if (data.length > 0) {
+                    const worksheet = XLSX.utils.json_to_sheet(data);
+                    XLSX.utils.book_append_sheet(consolidatedWorkbook, worksheet, sheetName);
+                    totalRows += data.length;
+                    log(`  ✓ Sheet "${sheetName}": ${data.length} total rows (1 header + ${data.length - 1} data rows)`, 'success');
+                } else {
+                    // Create empty sheet
+                    const worksheet = XLSX.utils.aoa_to_sheet([]);
+                    XLSX.utils.book_append_sheet(consolidatedWorkbook, worksheet, sheetName);
+                    log(`  ⚠ Sheet "${sheetName}": 0 rows (empty)`, 'warning');
+                }
+            });
+
+            // Generate filename with timestamp
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+            const filename = `Consolidated_GSTR2B_${timestamp}.xlsx`;
+
+            // Save file
+            log('Saving consolidated file...', 'info');
+            XLSX.writeFile(consolidatedWorkbook, filename);
+
+            updateProgress(100, 'Complete!');
+            log(`✓ Consolidation complete! Total rows: ${totalRows}`, 'success');
+            showSuccess(`✓ Successfully consolidated ${processedFiles} files!\nSaved as: ${filename}\nTotal rows processed: ${totalRows}\nSheets consolidated: ${discoveredSheets.size}`);
+
+            consolidateBtn.disabled = false;
+        }
+
+        consolidateBtn.addEventListener('click', consolidateFiles);
+    </script>
+</body>
+</html>

@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GSTR-3B PDF Data Extractor - Fixed</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{--bg1:linear-gradient(135deg,#667eea 0%,#764ba2 100%);--card:#fff}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Segoe UI,Tahoma,Arial,sans-serif;background:var(--bg1);padding:20px;color:#222}
+body.dark{background:linear-gradient(135deg,#0b1220 0%,#071025 100%);color:#ddd}
+.container{max-width:1200px;margin:0 auto;background:var(--card);border-radius:12px;padding:22px;box-shadow:0 18px 50px rgba(0,0,0,.25)}
+h1{text-align:center;margin-bottom:16px;font-size:1.8rem}
+.upload-section{background:#f8f9fa;border:2px dashed #667eea;border-radius:10px;padding:18px;text-align:center}
+.upload-btn{display:inline-block;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;padding:10px 20px;border-radius:40px;cursor:pointer}
+input[type=file]{display:none}
+.process-btn{display:block;margin:16px auto;background:linear-gradient(135deg,#f093fb,#f5576c);color:#fff;padding:10px 20px;border-radius:40px;border:none;cursor:pointer}
+.process-btn:disabled{opacity:.6;cursor:not-allowed}
+.file-list{margin-top:12px;padding:10px;background:#f8f9fa;border-radius:8px}
+.file-item{background:#fff;padding:8px;border-radius:6px;margin-top:6px}
+.section-title{margin-top:20px;border-bottom:3px solid #667eea;padding-bottom:8px;font-size:1.05rem}
+.gstin-info{background:#e3f2fd;padding:10px;border-radius:8px;margin-top:12px}
+table{width:100%;border-collapse:collapse;margin-top:12px;background:#fff;border-radius:8px;overflow:hidden}
+th{background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;padding:10px;text-align:left}
+td{padding:8px;border-bottom:1px solid #eee}
+.summary-table th{background:linear-gradient(135deg,#f093fb,#f5576c)}
+.spinner{border:4px solid #f3f3f3;border-top:4px solid #667eea;border-radius:50%;width:34px;height:34px;animation:spin 1s linear infinite;margin:10px auto}
+@keyframes spin{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}
+.float-actions{position:fixed;right:18px;bottom:18px;display:flex;flex-direction:column;gap:8px}
+.fab{background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;padding:8px 10px;border-radius:6px;border:none;cursor:pointer}
+.dark-toggle{position:fixed;left:18px;bottom:18px;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;padding:8px 10px;border-radius:6px;border:none;cursor:pointer}
+.footer-note{margin-top:18px;text-align:center;color:#555}
+.debug-section{background:#fff3cd;padding:10px;margin:10px 0;border-radius:8px;font-size:0.85rem;max-height:200px;overflow-y:auto}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>📊 GSTR-3B PDF Data Extractor</h1>
+
+  <div class="upload-section">
+    <label for="pdfFiles" class="upload-btn">Choose PDF Files</label>
+    <input id="pdfFiles" type="file" accept=".pdf" multiple>
+    <div id="fileList" class="file-list" style="display:none"></div>
+  </div>
+
+  <div style="text-align:center;margin:12px 0">
+    <label style="margin-right:8px;font-weight:600">Output Mode:</label>
+    <label style="margin-right:8px"><input type="radio" name="outputMode" value="summarized"> Summarized</label>
+    <label style="margin-right:8px"><input type="radio" name="outputMode" value="detailed" checked> Detailed</label>
+    <label><input type="radio" name="outputMode" value="both"> Both</label>
+  </div>
+
+  <button id="processBtn" class="process-btn" style="display:none" disabled>Extract Data from PDFs</button>
+
+  <div id="status" style="text-align:center;margin:12px 0"></div>
+  <div id="results"></div>
+
+  <p class="footer-note">This HTML is made by <strong>Siddartha Raju</strong> and <strong>Prasad</strong> – Jan 2024 Batch</p>
+</div>
+
+<div class="float-actions">
+  <button id="exportExcel" class="fab">Export Excel</button>
+  <button id="printBtn" class="fab">Print / PDF</button>
+</div>
+<button id="darkToggle" class="dark-toggle">Toggle Dark</button>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+const fileInput=document.getElementById('pdfFiles');
+const processBtn=document.getElementById('processBtn');
+const fileListDiv=document.getElementById('fileList');
+const statusDiv=document.getElementById('status');
+const resultsDiv=document.getElementById('results');
+const exportExcelBtn=document.getElementById('exportExcel');
+const printBtn=document.getElementById('printBtn');
+const darkToggle=document.getElementById('darkToggle');
+
+let selectedFiles=[];
+
+fileInput.addEventListener('change', (e)=>{
+  selectedFiles = Array.from(e.target.files);
+  if(selectedFiles.length){
+    fileListDiv.style.display='block';
+    fileListDiv.innerHTML = `<strong>Selected Files (${selectedFiles.length}):</strong>`;
+    selectedFiles.forEach(f=>{
+      const di = document.createElement('div');
+      di.className='file-item';
+      di.textContent = f.name;
+      fileListDiv.appendChild(di);
+    });
+    processBtn.style.display='block';
+    processBtn.disabled=false;
+  }
+});
+
+processBtn.addEventListener('click', async ()=>{
+  processBtn.disabled=true;
+  statusDiv.innerHTML = '<div class="spinner"></div><div>Processing PDFs...</div>';
+  resultsDiv.innerHTML = '';
+  try{
+    const allData=[];
+    for(let i=0;i<selectedFiles.length;i++){
+      statusDiv.innerHTML = `<div class="spinner"></div><div>Processing ${selectedFiles[i].name} (${i+1}/${selectedFiles.length})...</div>`;
+      const data = await processPDF(selectedFiles[i]);
+      allData.push(data);
+    }
+    displayResults(allData);
+    statusDiv.innerHTML = '<div style="color:#28a745">✓ Processing Complete!</div>';
+  }catch(err){
+    console.error(err);
+    statusDiv.innerHTML = `<div style="color:#dc3545">Error: ${err.message}</div>`;
+  }
+  processBtn.disabled=false;
+});
+
+async function processPDF(file){
+  const ab = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({data:ab}).promise;
+  let fullText = '';
+  for(let i=1;i<=pdf.numPages;i++){
+    const page = await pdf.getPage(i);
+    const textContent = await page.getTextContent();
+    const pageText = textContent.items.map(item => item.str).join(' ');
+    fullText += pageText + '\n';
+  }
+  return extractGSTData(fullText, file.name);
+}
+
+function safeParseFloat(s){
+  if(s===undefined||s===null) return 0;
+  try{ 
+    const cleaned = String(s).replace(/[^0-9.-]+/g,'');
+    return parseFloat(cleaned) || 0; 
+  }catch(e){return 0;}
+}
+
+function extractGSTData(text, filename){
+  const cleanText = text.replace(/\s+/g,' ').trim();
+
+  // GSTIN extraction
+  const gstinMatch = cleanText.match(/GSTIN\s+of\s+the\s+supplier\s+([A-Z0-9]{15})/i);
+  const gstin = gstinMatch ? gstinMatch[1] : 'Unknown';
+
+  // Period extraction
+  const periodMatch = cleanText.match(/Period\s+([A-Za-z]+)/i);
+  const yearMatch = cleanText.match(/Year\s+(\d{4}-\d{2})/i);
+  const period = periodMatch && yearMatch ? `${periodMatch[1]} ${yearMatch[1]}` : 'Unknown';
+
+  // Company extraction
+  const companyMatch = cleanText.match(/Legal\s+name\s+of\s+the\s+registered\s+person\s+([\w\s&.,-]+?)(?:\s+2\(b\)|Trade\s+name)/i);
+  const company = companyMatch ? companyMatch[1].trim() : 'Unknown';
+
+  // Extract Table 3.1 values
+  const table31Data = extractTable31Values(cleanText);
+  
+  // Extract Table 4 values
+  const table4Data = extractTable4Values(cleanText);
+
+  return {
+    filename,
+    gstin,
+    company,
+    period,
+    table31: table31Data,
+    ...table4Data
+  };
+}
+
+function extractTable31Values(text){
+  const data = {
+    outwardTaxable: { taxableValue: 0, igst: 0, cgst: 0, sgst: 0, cess: 0 },
+    outwardZeroRated: { taxableValue: 0, igst: 0, cgst: 0, sgst: 0, cess: 0 },
+    otherOutward: { taxableValue: 0 },
+    inwardReverse: { taxableValue: 0, igst: 0, cgst: 0, sgst: 0, cess: 0 },
+    nonGST: { taxableValue: 0 }
+  };
+
+  // (a) Outward taxable supplies - look for the pattern with 5 numbers
+  let match = text.match(/\(a\)\s*Outward\s+taxable\s+supplies\s*\(other\s+than\s+zero\s+rated[^)]*\)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/i);
+  if(match){
+    data.outwardTaxable.taxableValue = safeParseFloat(match[1]);
+    data.outwardTaxable.igst = safeParseFloat(match[2]);
+    data.outwardTaxable.cgst = safeParseFloat(match[3]);
+    data.outwardTaxable.sgst = safeParseFloat(match[4]);
+    data.outwardTaxable.cess = safeParseFloat(match[5]);
+  }
+
+  // (b) Outward taxable supplies (zero rated) - look for pattern with taxable value and igst (- for cgst/sgst)
+  match = text.match(/\(b\)\s*Outward\s+taxable\s+supplies\s*\(zero\s+rated\)\s+([\d.]+)\s+([\d.]+)\s+-\s+-\s+([\d.]+)/i);
+  if(match){
+    data.outwardZeroRated.taxableValue = safeParseFloat(match[1]);
+    data.outwardZeroRated.igst = safeParseFloat(match[2]);
+    data.outwardZeroRated.cess = safeParseFloat(match[3]);
+  }
+
+  // (c) Other outward supplies
+  match = text.match(/\(c\s*\)\s*Other\s+outward\s+supplies[^)]*\)\s+([\d.]+)/i);
+  if(match){
+    data.otherOutward.taxableValue = safeParseFloat(match[1]);
+  }
+
+  // (d) Inward supplies (liable to reverse charge)
+  match = text.match(/\(d\)\s*Inward\s+supplies\s*\(liable\s+to\s+reverse\s+charge\)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/i);
+  if(match){
+    data.inwardReverse.taxableValue = safeParseFloat(match[1]);
+    data.inwardReverse.igst = safeParseFloat(match[2]);
+    data.inwardReverse.cgst = safeParseFloat(match[3]);
+    data.inwardReverse.sgst = safeParseFloat(match[4]);
+    data.inwardReverse.cess = safeParseFloat(match[5]);
+  }
+
+  // (e) Non-GST outward supplies
+  match = text.match(/\(e\)\s*Non-GST\s+outward\s+supplies\s+([\d.]+)/i);
+  if(match){
+    data.nonGST.taxableValue = safeParseFloat(match[1]);
+  }
+
+  return data;
+}
+
+function extractTable4Values(text){
+  const data = {
+    rcm: { igst: 0, cgst: 0, sgst: 0, cess: 0 },
+    allOtherITC: { igst: 0, cgst: 0, sgst: 0, cess: 0 },
+    itcReversed: { 
+      rule38_42_43: { igst: 0, cgst: 0, sgst: 0, cess: 0 }, 
+      others: { igst: 0, cgst: 0, sgst: 0, cess: 0 } 
+    },
+    otherDetails: { 
+      reclaimed: { igst: 0, cgst: 0, sgst: 0, cess: 0 }, 
+      ineligible: { igst: 0, cgst: 0, sgst: 0, cess: 0 } 
+    },
+    netITC: { igst: 0, cgst: 0, sgst: 0, cess: 0 }
+  };
+
+  // (3) Inward supplies liable to reverse charge (RCM)
+  let match = text.match(/\(3\)\s*Inward\s+supplies\s+liable\s+to\s+reverse\s+charge[^)]*\)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/i);
+  if(match){
+    data.rcm.igst = safeParseFloat(match[1]);
+    data.rcm.cgst = safeParseFloat(match[2]);
+    data.rcm.sgst = safeParseFloat(match[3]);
+    data.rcm.cess = safeParseFloat(match[4]);
+  }
+
+  // (5) All other ITC
+  match = text.match(/\(5\)\s*All\s+other\s+ITC\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/i);
+  if(match){
+    data.allOtherITC.igst = safeParseFloat(match[1]);
+    data.allOtherITC.cgst = safeParseFloat(match[2]);
+    data.allOtherITC.sgst = safeParseFloat(match[3]);
+    data.allOtherITC.cess = safeParseFloat(match[4]);
+  }
+
+  // B. ITC Reversed - (1) As per rules 38, 42 & 43
+  match = text.match(/\(1\)\s*As\s+per\s+rules\s+38,?\s*42\s*&\s*43[^)]*\)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/i);
+  if(match){
+    data.itcReversed.rule38_42_43.igst = safeParseFloat(match[1]);
+    data.itcReversed.rule38_42_43.cgst = safeParseFloat(match[2]);
+    data.itcReversed.rule38_42_43.sgst = safeParseFloat(match[3]);
+    data.itcReversed.rule38_42_43.cess = safeParseFloat(match[4]);
+  }
+
+  // B. ITC Reversed - (2) Others
+  match = text.match(/B\.\s*ITC\s+Reversed[\s\S]{0,300}?\(2\)\s*Others\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/i);
+  if(match){
+    data.itcReversed.others.igst = safeParseFloat(match[1]);
+    data.itcReversed.others.cgst = safeParseFloat(match[2]);
+    data.itcReversed.others.sgst = safeParseFloat(match[3]);
+    data.itcReversed.others.cess = safeParseFloat(match[4]);
+  }
+
+  // C. Net ITC available (A-B)
+  match = text.match(/C\.\s*Net\s+ITC\s+available\s*\(A\s*-?\s*B\)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/i);
+  if(match){
+    data.netITC.igst = safeParseFloat(match[1]);
+    data.netITC.cgst = safeParseFloat(match[2]);
+    data.netITC.sgst = safeParseFloat(match[3]);
+    data.netITC.cess = safeParseFloat(match[4]);
+  }
+
+  // D. Other Details - (1) ITC reclaimed
+  match = text.match(/\(1\)\s*ITC\s+reclaimed\s+which\s+was\s+reversed[^)]*\)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/i);
+  if(match){
+    data.otherDetails.reclaimed.igst = safeParseFloat(match[1]);
+    data.otherDetails.reclaimed.cgst = safeParseFloat(match[2]);
+    data.otherDetails.reclaimed.sgst = safeParseFloat(match[3]);
+    data.otherDetails.reclaimed.cess = safeParseFloat(match[4]);
+  }
+
+  // D. Other Details - (2) Ineligible ITC
+  match = text.match(/\(2\)\s*Ineligible\s+ITC\s+under\s+section\s+16\(4\)[^)]*\)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/i);
+  if(match){
+    data.otherDetails.ineligible.igst = safeParseFloat(match[1]);
+    data.otherDetails.ineligible.cgst = safeParseFloat(match[2]);
+    data.otherDetails.ineligible.sgst = safeParseFloat(match[3]);
+    data.otherDetails.ineligible.cess = safeParseFloat(match[4]);
+  }
+
+  return data;
+}
+
+function displayResults(allData){
+  let html = '';
+  const mode = document.querySelector('input[name="outputMode"]:checked')?.value || 'detailed';
+
+  // Detailed per-file output
+  if(mode === 'detailed' || mode === 'both'){
+    allData.forEach(data=>{
+      html += `<div class="gstin-info"><strong>📄 File:</strong> ${data.filename}<br><strong>🏢 Company:</strong> ${data.company}<br><strong>📋 GSTIN:</strong> ${data.gstin}<br><strong>📅 Period:</strong> ${data.period}</div>`;
+      
+      // Table 3.1
+      html += `<h3 class="section-title">Table 3.1 - Details of Outward & Inward Supplies</h3><table>
+        <tr><th>Description</th><th>Taxable Value</th><th>IGST</th><th>CGST</th><th>SGST/UTGST</th><th>Cess</th></tr>
+        <tr><td>(a) Outward taxable supplies</td><td>₹ ${(data.table31.outwardTaxable.taxableValue||0).toFixed(2)}</td><td>₹ ${(data.table31.outwardTaxable.igst||0).toFixed(2)}</td><td>₹ ${(data.table31.outwardTaxable.cgst||0).toFixed(2)}</td><td>₹ ${(data.table31.outwardTaxable.sgst||0).toFixed(2)}</td><td>₹ ${(data.table31.outwardTaxable.cess||0).toFixed(2)}</td></tr>
+        <tr><td>(b) Outward taxable supplies (zero rated)</td><td>₹ ${(data.table31.outwardZeroRated.taxableValue||0).toFixed(2)}</td><td>₹ ${(data.table31.outwardZeroRated.igst||0).toFixed(2)}</td><td>-</td><td>-</td><td>₹ ${(data.table31.outwardZeroRated.cess||0).toFixed(2)}</td></tr>
+        <tr><td>(c) Other outward supplies (nil rated, exempted)</td><td>₹ ${(data.table31.otherOutward.taxableValue||0).toFixed(2)}</td><td>-</td><td>-</td><td>-</td><td>-</td></tr>
+        <tr><td>(d) Inward supplies (liable to reverse charge)</td><td>₹ ${(data.table31.inwardReverse.taxableValue||0).toFixed(2)}</td><td>₹ ${(data.table31.inwardReverse.igst||0).toFixed(2)}</td><td>₹ ${(data.table31.inwardReverse.cgst||0).toFixed(2)}</td><td>₹ ${(data.table31.inwardReverse.sgst||0).toFixed(2)}</td><td>₹ ${(data.table31.inwardReverse.cess||0).toFixed(2)}</td></tr>
+        <tr><td>(e) Non-GST outward supplies</td><td>₹ ${(data.table31.nonGST.taxableValue||0).toFixed(2)}</td><td>-</td><td>-</td><td>-</td><td>-</td></tr>
+      </table>`;
+
+      // Table 4 (ITC)
+      html += `<h3 class="section-title">Table 4 - Eligible ITC</h3><table>
+        <tr><th>Category</th><th>IGST</th><th>CGST</th><th>SGST/UTGST</th><th>Cess</th></tr>
+        <tr><td>(3) Inward supplies liable to reverse charge</td><td>₹ ${(data.rcm.igst||0).toFixed(2)}</td><td>₹ ${(data.rcm.cgst||0).toFixed(2)}</td><td>₹ ${(data.rcm.sgst||0).toFixed(2)}</td><td>₹ ${(data.rcm.cess||0).toFixed(2)}</td></tr>
+        <tr><td>(5) All Other ITC</td><td>₹ ${(data.allOtherITC.igst||0).toFixed(2)}</td><td>₹ ${(data.allOtherITC.cgst||0).toFixed(2)}</td><td>₹ ${(data.allOtherITC.sgst||0).toFixed(2)}</td><td>₹ ${(data.allOtherITC.cess||0).toFixed(2)}</td></tr>
+        <tr><td>B(1) ITC Reversed - Rules 38/42/43</td><td>₹ ${(data.itcReversed.rule38_42_43.igst||0).toFixed(2)}</td><td>₹ ${(data.itcReversed.rule38_42_43.cgst||0).toFixed(2)}</td><td>₹ ${(data.itcReversed.rule38_42_43.sgst||0).toFixed(2)}</td><td>₹ ${(data.itcReversed.rule38_42_43.cess||0).toFixed(2)}</td></tr>
+        <tr><td>B(2) ITC Reversed - Others</td><td>₹ ${(data.itcReversed.others.igst||0).toFixed(2)}</td><td>₹ ${(data.itcReversed.others.cgst||0).toFixed(2)}</td><td>₹ ${(data.itcReversed.others.sgst||0).toFixed(2)}</td><td>₹ ${(data.itcReversed.others.cess||0).toFixed(2)}</td></tr>
+        <tr style="background:#e8f5e9;font-weight:700"><td>C. Net ITC available (A-B)</td><td>₹ ${(data.netITC.igst||0).toFixed(2)}</td><td>₹ ${(data.netITC.cgst||0).toFixed(2)}</td><td>₹ ${(data.netITC.sgst||0).toFixed(2)}</td><td>₹ ${(data.netITC.cess||0).toFixed(2)}</td></tr>
+        <tr><td>D(1) ITC reclaimed (reversed earlier)</td><td>₹ ${(data.otherDetails.reclaimed.igst||0).toFixed(2)}</td><td>₹ ${(data.otherDetails.reclaimed.cgst||0).toFixed(2)}</td><td>₹ ${(data.otherDetails.reclaimed.sgst||0).toFixed(2)}</td><td>₹ ${(data.otherDetails.reclaimed.cess||0).toFixed(2)}</td></tr>
+        <tr><td>D(2) Ineligible ITC (Section 16(4) & PoS)</td><td>₹ ${(data.otherDetails.ineligible.igst||0).toFixed(2)}</td><td>₹ ${(data.otherDetails.ineligible.cgst||0).toFixed(2)}</td><td>₹ ${(data.otherDetails.ineligible.sgst||0).toFixed(2)}</td><td>₹ ${(data.otherDetails.ineligible.cess||0).toFixed(2)}</td></tr>
+      </table>`;
+    });
+  }
+
+  // Consolidated summary
+  if(allData.length>1 && (mode==='summarized' || mode==='both')){
+    html += `<h2 class="section-title">📊 Consolidated Summary - Table 3.1</h2>
+    <table class="summary-table"><tr><th>Period</th><th>Outward Taxable (Value)</th><th>IGST</th><th>CGST</th><th>SGST</th><th>Zero Rated (Value)</th><th>Zero Rated (IGST)</th><th>Inward RC (Value)</th><th>Inward RC (IGST)</th><th>Inward RC (CGST)</th><th>Inward RC (SGST)</th></tr>`;
+    
+    const totals31 = {outwardTaxable: {taxableValue:0,igst:0,cgst:0,sgst:0}, outwardZeroRated:{taxableValue:0,igst:0}, inwardReverse:{taxableValue:0,igst:0,cgst:0,sgst:0}};
+    
+    allData.forEach(data=>{
+      html += `<tr><td><strong>${data.period}</strong></td>
+        <td>₹ ${ (data.table31.outwardTaxable.taxableValue||0).toFixed(2) }</td>
+        <td>₹ ${ (data.table31.outwardTaxable.igst||0).toFixed(2) }</td>
+        <td>₹ ${ (data.table31.outwardTaxable.cgst||0).toFixed(2) }</td>
+        <td>₹ ${ (data.table31.outwardTaxable.sgst||0).toFixed(2) }</td>
+        <td>₹ ${ (data.table31.outwardZeroRated.taxableValue||0).toFixed(2) }</td>
+        <td>₹ ${ (data.table31.outwardZeroRated.igst||0).toFixed(2) }</td>
+        <td>₹ ${ (data.table31.inwardReverse.taxableValue||0).toFixed(2) }</td>
+        <td>₹ ${ (data.table31.inwardReverse.igst||0).toFixed(2) }</td>
+        <td>₹ ${ (data.table31.inwardReverse.cgst||0).toFixed(2) }</td>
+        <td>₹ ${ (data.table31.inwardReverse.sgst||0).toFixed(2) }</td></tr>`;
+      
+      totals31.outwardTaxable.taxableValue += data.table31.outwardTaxable.taxableValue || 0;
+      totals31.outwardTaxable.igst += data.table31.outwardTaxable.igst || 0;
+      totals31.outwardTaxable.cgst += data.table31.outwardTaxable.cgst || 0;
+      totals31.outwardTaxable.sgst += data.table31.outwardTaxable.sgst || 0;
+      totals31.outwardZeroRated.taxableValue += data.table31.outwardZeroRated.taxableValue || 0;
+      totals31.outwardZeroRated.igst += data.table31.outwardZeroRated.igst || 0;
+      totals31.inwardReverse.taxableValue += data.table31.inwardReverse.taxableValue || 0;
+      totals31.inwardReverse.igst += data.table31.inwardReverse.igst || 0;
+      totals31.inwardReverse.cgst += data.table31.inwardReverse.cgst || 0;
+      totals31.inwardReverse.sgst += data.table31.inwardReverse.sgst || 0;
+    });
+    
+    html += `<tr style="background:#fff3cd;font-weight:700"><td>TOTAL</td>
+      <td>₹ ${ totals31.outwardTaxable.taxableValue.toFixed(2) }</td>
+      <td>₹ ${ totals31.outwardTaxable.igst.toFixed(2) }</td>
+      <td>₹ ${ totals31.outwardTaxable.cgst.toFixed(2) }</td>
+      <td>₹ ${ totals31.outwardTaxable.sgst.toFixed(2) }</td>
+      <td>₹ ${ totals31.outwardZeroRated.taxableValue.toFixed(2) }</td>
+      <td>₹ ${ totals31.outwardZeroRated.igst.toFixed(2) }</td>
+      <td>₹ ${ totals31.inwardReverse.taxableValue.toFixed(2) }</td>
+      <td>₹ ${ totals31.inwardReverse.igst.toFixed(2) }</td>
+      <td>₹ ${ totals31.inwardReverse.cgst.toFixed(2) }</td>
+      <td>₹ ${ totals31.inwardReverse.sgst.toFixed(2) }</td></tr></table>`;
+
+    // Consolidated Table 4
+    html += `<h2 class="section-title">📊 Consolidated Summary - Table 4 (ITC)</h2>
+      <table class="summary-table"><tr><th>Period</th><th>RCM IGST</th><th>RCM CGST</th><th>RCM SGST</th><th>Other ITC IGST</th><th>Other ITC CGST</th><th>Other ITC SGST</th><th>Net ITC IGST</th><th>Net ITC CGST</th><th>Net ITC SGST</th></tr>`;
+    
+    const totals4 = {rcm:{igst:0,cgst:0,sgst:0}, allOtherITC:{igst:0,cgst:0,sgst:0}, netITC:{igst:0,cgst:0,sgst:0}};
+    
+    allData.forEach(d=>{
+      html += `<tr><td><strong>${d.period}</strong></td>
+        <td>₹ ${ (d.rcm.igst||0).toFixed(2) }</td><td>₹ ${ (d.rcm.cgst||0).toFixed(2) }</td><td>₹ ${ (d.rcm.sgst||0).toFixed(2) }</td>
+        <td>₹ ${ (d.allOtherITC.igst||0).toFixed(2) }</td><td>₹ ${ (d.allOtherITC.cgst||0).toFixed(2) }</td><td>₹ ${ (d.allOtherITC.sgst||0).toFixed(2) }</td>
+        <td>₹ ${ (d.netITC.igst||0).toFixed(2) }</td><td>₹ ${ (d.netITC.cgst||0).toFixed(2) }</td><td>₹ ${ (d.netITC.sgst||0).toFixed(2) }</td></tr>`;
+      
+      totals4.rcm.igst += d.rcm.igst || 0; 
+      totals4.rcm.cgst += d.rcm.cgst || 0; 
+      totals4.rcm.sgst += d.rcm.sgst || 0;
+      totals4.allOtherITC.igst += d.allOtherITC.igst || 0; 
+      totals4.allOtherITC.cgst += d.allOtherITC.cgst || 0; 
+      totals4.allOtherITC.sgst += d.allOtherITC.sgst || 0;
+      totals4.netITC.igst += d.netITC.igst || 0; 
+      totals4.netITC.cgst += d.netITC.cgst || 0; 
+      totals4.netITC.sgst += d.netITC.sgst || 0;
+    });
+    
+    html += `<tr style="background:#fff3cd;font-weight:700"><td>TOTAL</td>
+      <td>₹ ${ totals4.rcm.igst.toFixed(2) }</td><td>₹ ${ totals4.rcm.cgst.toFixed(2) }</td><td>₹ ${ totals4.rcm.sgst.toFixed(2) }</td>
+      <td>₹ ${ totals4.allOtherITC.igst.toFixed(2) }</td><td>₹ ${ totals4.allOtherITC.cgst.toFixed(2) }</td><td>₹ ${ totals4.allOtherITC.sgst.toFixed(2) }</td>
+      <td>₹ ${ totals4.netITC.igst.toFixed(2) }</td><td>₹ ${ totals4.netITC.cgst.toFixed(2) }</td><td>₹ ${ totals4.netITC.sgst.toFixed(2) }</td></tr></table>`;
+  }
+
+  resultsDiv.innerHTML = html;
+}
+
+exportExcelBtn.addEventListener('click', ()=>{
+  if(!resultsDiv.innerHTML.trim()){ 
+    alert('No results to export. Please process PDFs first.'); 
+    return; 
+  }
+  const wb = XLSX.utils.book_new();
+  const tables = resultsDiv.querySelectorAll('table');
+  if(!tables.length){ 
+    alert('No table data to export'); 
+    return; 
+  }
+  tables.forEach((tbl, idx) => {
+    const aoa = Array.from(tbl.rows).map(r => Array.from(r.cells).map(c => c.innerText));
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    XLSX.utils.book_append_sheet(wb, ws, `Sheet${idx+1}`);
+  });
+  XLSX.writeFile(wb, 'GSTR3B_Extracted.xlsx');
+});
+
+printBtn.addEventListener('click', ()=> window.print());
+darkToggle.addEventListener('click', ()=> document.body.classList.toggle('dark'));
+</script>
+</body>
+</html>
